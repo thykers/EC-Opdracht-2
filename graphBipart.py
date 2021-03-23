@@ -220,32 +220,6 @@ class Model:
         self.local_search_count_calls += 1
         return best_solution, best_score
 
-    def mlsk(self):
-        mls_solution = copy.deepcopy(self.currentSolution)
-        mls_score = self.cuts
-        while self.local_search_count_calls < self.max_local_search_calls:
-
-            current_run_best = copy.deepcopy(self.currentSolution)
-            current_run_best_cuts = self.cuts
-            while True:
-                new_solution, new_score = self.fm_pass()
-                if np.array_equal(new_solution, current_run_best):
-                    # TODO: Eventueel een stopping_count bijhouden, dat telt hoe vaak de solutions gelijk zijn. 
-                    # TODO: Zo stopt de Local-search niet als een keer de solutions gelijk zijn. (Zie ils)
-                    # print(f"converged with {new_score} cuts")
-                    break
-                if new_score < current_run_best_cuts:
-                    current_run_best = copy.deepcopy(new_solution)
-                    current_run_best_cuts = new_score
-
-            if current_run_best_cuts < mls_score:
-                mls_solution = copy.deepcopy(current_run_best)
-                mls_score = current_run_best_cuts
-            self.reset()
-        print(self.local_search_count_calls)
-        print(mls_solution, mls_score)
-        return mls_solution, mls_score
-
     def mls(self, convergence_criteria):
         solution = self.generate_random_solution()
         score = self.calculate_cuts(solution)
