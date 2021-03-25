@@ -255,11 +255,28 @@ class Model:
         return mls_solution, mls_score
 
     def mutate_solution(self, solution, perturbation_size):
+        sampleSize = np.random.binomial(len(solution), perturbation_size * 2)
+
+        indices_0 = set()
+        while len(indices_0) <= sampleSize:
+            index = random.randint(0, len(solution) - 1)
+            if solution[index] == 0:
+                indices_0.add(index)
+        indices_1 = set()
+        while len(indices_1) <= sampleSize:
+            index = random.randint(0, len(solution) - 1)
+            if solution[index] == 1:
+                indices_1.add(index)
+        mutated_solution = copy.deepcopy(solution)
+        mutated_solution[list(indices_0)] = 1
+        mutated_solution[list(indices_1)] = 0
+        return copy.deepcopy(mutated_solution)
+
+    def mutate_solution_2(self, solution, perturbation_size):
         mutated_solution = copy.deepcopy(solution)
         solution = copy.deepcopy(np.array([1 - bit if (random.uniform(0, 1)) <= perturbation_size else bit
-                                           for bit in mutated_solution]))
+                                        for bit in mutated_solution]))
         return solution
-
     def ils(self, perturbation_size, convergence_criteria):
         solution = self.generate_random_solution()
         score = self.calculate_cuts(solution)
@@ -290,7 +307,29 @@ class Model:
         # print(self.local_search_count_calls)
         print(ils_score)
         print(f"Cuts verification: {self.calculate_cuts(ils_solution)}")
+        if not self.valid_solution(ils_solution):
+            print("error")
         return ils_solution, ils_score
+
+    def hamming_distance(self, parent1, parent2):
+        return sum(parent1 == parent2)
+    
+    def equal_swap(self, child, parent2):
+        #Uniform crossover such that amount of bits is equal:
+        crossoverProb = 0.5
+        even = 0
+        for i in range(len(child)):
+            if child[i] != parent2[i]:
+                if even == 0:
+                    if (random.uniform(0, 1) <= crossoverProb):
+                        if parent2[i] == 1:
+                            even += 1
+                        if parent2[i] == 0:
+                            even -= 0
+                        child[i] = parent2[i]
+    
+    def valid_solution(self, solution):
+        return sum(solution) == int(len(solution) / 2)
 
     def gls(self, populationsize=50, convergence_criteria=5):
         population = []
@@ -318,9 +357,15 @@ class Model:
         #Generate new child, do fm-pass until local optima and compete with worst solution.
         while self.local_search_count_calls < self.max_local_search_calls:
             parents = random.sample(population, 2)
-            offspring1 = copy.deepcopy(parents[0])
-            crossoverProb = 0.5 #1 / self.length
-            indices = np.array([x for x in list(range(len(parents[0]))) if (random.uniform(0, 1) <= crossoverProb)])
+            if self.hamming_distance(parents[0], parents[1]) > int(len(parents[0]) / 2):
+                offspring1 = 1 - copy.deepcopy(parents[0])
+            else:
+                offspring1 = copy.deepcopy(parents[0])
+
+            indices_1_to_0 = np.array([x for x in list(range(len(parents[0]))) if offspring1[x] != parents[1][x] and parents[1][x] == 0])
+            indices_0_to_1 = np.array([x for x in list(range(len(parents[0]))) if offspring1[x] != parents[1][x] and parents[1][x] == 1])
+            sampleSize = random.randint(0, min(len(indices_0_to_1), len(indices_1_to_0)))
+            indices = np.concatenate((np.random.choice(indices_1_to_0, size=sampleSize, replace=False), np.random.choice(indices_0_to_1, size=sampleSize, replace=False)))
             offspring1[indices] = parents[1][indices]
             no_change_in_solution_count = 0
 
@@ -364,9 +409,6 @@ class Model:
         g = nx.Graph()
         g.add_nodes_from(nodes)
         g.add_edges_from(edges)
-        #plt.subplot(121)
-        #nx.draw(g, with_labels=True, font_weight='bold')
-        #plt.subplot(122)
         position_dict = {}
         f = open("Graph500.txt", "r")
         for index, line in enumerate(f):
@@ -381,32 +423,35 @@ class Model:
         plt.show()
 
     def ils_test(model):
-    test_values = [0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.5]
-    best_score = 1000
-    history = []
-    for value in test_values[6:7]:
-        print(f"Test Value: {value}")
-        total_repeat_count = 0
-        total_score = 0
-        for i in range(1, 26):
-            print(f"Run: {i}")
-            solution, score, repeat_count = model.ils(value, 3)
-            total_repeat_count += repeat_count
-            total_score += score
-        average_score = int(total_score / 25)
-        average_repeat = int(repeat_count / 25)
-        print(f"Average score: {average_score} -- Average repeat: {average_repeat}")
-        history.append((average_score, average_repeat))
-        if average_score <= best_score:
-            best_score = average_score
-        else:
-            break
-    print(history)
+        test_values = [0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.5]
+        best_score = 1000
+        history = []
+        for value in test_values[6:7]:
+            print(f"Test Value: {value}")
+            total_repeat_count = 0
+            total_score = 0
+            for i in range(1, 26):
+                print(f"Run: {i}")
+                solution, score, repeat_count = model.ils(value, 3)
+                total_repeat_count += repeat_count
+                total_score += score
+            average_score = int(total_score / 25)
+            average_repeat = int(repeat_count / 25)
+            print(f"Average score: {average_score} -- Average repeat: {average_repeat}")
+            history.append((average_score, average_repeat))
+            if average_score <= best_score:
+                best_score = average_score
+            else:
+                break
+        print(history)
 
 x = Model()
 timer = time.time()
-#x.mls(5)
-#x.ils(0.05, 5)
-sol, score = x.gls(populationsize=50, convergence_criteria=5)
+#x.hamming_distance(x.generate_random_solution(), x.generate_random_solution())
+#x.mls(3)
+#for i in range(10):
+    #x.local_search_count_calls = 0
+x.ils(0.05, 3)
+#sol, score = x.gls(populationsize=50, convergence_criteria=5)
 #x.draw_network(sol)
 print(f"Elapsed: {time.time() - timer}")
