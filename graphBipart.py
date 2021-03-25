@@ -4,8 +4,9 @@ import copy
 import cProfile
 import random
 import time
-
-
+import networkx as nx
+import matplotlib.pyplot as plt
+import scipy
 class Node:
     index = 0
     gain = 0
@@ -107,7 +108,7 @@ class Graph:
 
 class Model:
     local_search_count_calls = 0
-    max_local_search_calls = 1000
+    max_local_search_calls = 10000
 
     def __init__(self):
         self.Graph = Graph()
@@ -126,7 +127,6 @@ class Model:
         node_amount = len(self.Graph.nodes_list)
         solution = np.repeat(0, node_amount)
         solution[int(node_amount / 2):] = np.repeat(1, int(node_amount / 2))
-        # np.random.seed(1)
         np.random.shuffle(solution)
         return solution
 
@@ -218,6 +218,8 @@ class Model:
 
         # print(f"Best score: {best_score}")
         self.local_search_count_calls += 1
+        if self.calculate_cuts(best_solution) != best_score:
+            print("mistake")
         return best_solution, best_score
 
     def mls(self, convergence_criteria):
@@ -290,13 +292,121 @@ class Model:
         print(f"Cuts verification: {self.calculate_cuts(ils_solution)}")
         return ils_solution, ils_score
 
-    def gls(self):
-        ...
+    def gls(self, populationsize=50, convergence_criteria=5):
+        population = []
+        scores = []
+        #Find population of 50 local optima
+        for i in range(0, populationsize):
+            no_change_in_solution_count = 0
+            run_solution = self.generate_random_solution()
+            run_score = self.calculate_cuts(run_solution)
+            while no_change_in_solution_count < convergence_criteria:
+                new_solution, new_score = self.fm_pass(run_solution)
 
+                if new_score >= run_score:
+                    no_change_in_solution_count += 1
+                elif new_score < run_score:
+                    no_change_in_solution_count = 0
+                    run_solution = copy.deepcopy(new_solution)
+                    run_score = new_score
+            population.append(copy.deepcopy(run_solution))
+            scores.append(run_score)
+            run_solution = self.generate_random_solution()
+        sortedIndices = list(range(populationsize))
+        sortedIndices.sort(key=lambda x: scores[x])
+
+        #Generate new child, do fm-pass until local optima and compete with worst solution.
+        while self.local_search_count_calls < self.max_local_search_calls:
+            parents = random.sample(population, 2)
+            offspring1 = copy.deepcopy(parents[0])
+            crossoverProb = 0.5 #1 / self.length
+            indices = np.array([x for x in list(range(len(parents[0]))) if (random.uniform(0, 1) <= crossoverProb)])
+            offspring1[indices] = parents[1][indices]
+            no_change_in_solution_count = 0
+
+            run_solution = copy.deepcopy(offspring1)
+            run_score = self.calculate_cuts(run_solution)
+            while no_change_in_solution_count < convergence_criteria:
+                new_solution, new_score = self.fm_pass(copy.deepcopy(run_solution))
+                if self.calculate_cuts(new_solution) != new_score:
+                    print("mistake")
+                if new_score >= run_score:
+                    no_change_in_solution_count += 1
+                elif new_score < run_score:
+                    no_change_in_solution_count = 0
+                    run_solution = copy.deepcopy(new_solution)
+                    run_score = new_score
+
+            if run_score < scores[sortedIndices[-1]]:
+                #replace worst solution
+                if self.calculate_cuts(run_solution) != run_score:
+                    print("mistake")
+                population[sortedIndices[-1]] = copy.deepcopy(run_solution)
+                scores[sortedIndices[-1]] = run_score
+                sortedIndices.sort(key=lambda x: scores[x])
+        print(scores[sortedIndices[0]])
+        print(f"Cuts verification: {self.calculate_cuts(population[sortedIndices[0]])}")
+        return population[sortedIndices[0]], scores[sortedIndices[0]]
+
+    def get_color(self, node, solution):
+        if solution[node.index - 1] == 1:
+            return "red"
+        else:
+            return "blue"
+
+    def draw_network(self, solution):
+        nodes = [node.index for node in self.Graph.nodes_list]
+        edges = set()
+        for node in self.Graph.nodes_list:
+            for link in node.links:
+                edges.add((min(node.index, link), max(node.index, link)))
+        print(edges)
+        g = nx.Graph()
+        g.add_nodes_from(nodes)
+        g.add_edges_from(edges)
+        #plt.subplot(121)
+        #nx.draw(g, with_labels=True, font_weight='bold')
+        #plt.subplot(122)
+        position_dict = {}
+        f = open("Graph500.txt", "r")
+        for index, line in enumerate(f):
+            positions = line.split()[1].replace('(', '').replace(')', '').split(',')
+            x = float(positions[0])
+            y = float(positions[1])
+            position_dict[(index + 1)] = (x,y)
+        node_colors = [self.get_color(node, solution) for node in self.Graph.nodes_list]
+        nx.draw_networkx(g, pos=position_dict, node_color=node_colors)
+        mng = plt.get_current_fig_manager()
+        mng.window.state('zoomed')
+        plt.show()
+
+    def ils_test(model):
+    test_values = [0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.5]
+    best_score = 1000
+    history = []
+    for value in test_values[6:7]:
+        print(f"Test Value: {value}")
+        total_repeat_count = 0
+        total_score = 0
+        for i in range(1, 26):
+            print(f"Run: {i}")
+            solution, score, repeat_count = model.ils(value, 3)
+            total_repeat_count += repeat_count
+            total_score += score
+        average_score = int(total_score / 25)
+        average_repeat = int(repeat_count / 25)
+        print(f"Average score: {average_score} -- Average repeat: {average_repeat}")
+        history.append((average_score, average_repeat))
+        if average_score <= best_score:
+            best_score = average_score
+        else:
+            break
+    print(history)
 
 x = Model()
-
 timer = time.time()
-x.mls(5)
+#x.mls(5)
 #x.ils(0.05, 5)
+sol, score = x.gls(populationsize=50, convergence_criteria=5)
+#x.draw_network(sol)
 print(f"Elapsed: {time.time() - timer}")
