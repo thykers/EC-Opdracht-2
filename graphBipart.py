@@ -109,10 +109,13 @@ class Graph:
 class Model:
     local_search_count_calls = 0
     max_local_search_calls = 10000
-
+    use_fm_stopping_criterion = True
+    MLS_run_time = 90
+    
     def __init__(self):
         self.Graph = Graph()
         self.maxLinks = self.Graph.maxLinks
+        self.start_time = time.time()
 
     def calculate_cuts(self, solution):
         cut = 0
@@ -229,13 +232,14 @@ class Model:
         mls_solution = copy.deepcopy(solution)
         mls_score = score
 
-        while self.local_search_count_calls < self.max_local_search_calls:
+        while (self.use_fm_stopping_criterion and self.local_search_count_calls < self.max_local_search_calls) or (not self.use_fm_stopping_criterion and time.time() - self.start_time < self.MLS_run_time):
             no_change_in_solution_count = 0
             run_solution = copy.deepcopy(solution)
             run_score = self.calculate_cuts(run_solution)
             while no_change_in_solution_count < convergence_criteria:
                 new_solution, new_score = self.fm_pass(solution)
-
+                if(new_solution == run_solution).all():
+                    break
                 if new_score >= run_score:
                     no_change_in_solution_count += 1
                 elif new_score < score:
@@ -277,31 +281,35 @@ class Model:
         solution = copy.deepcopy(np.array([1 - bit if (random.uniform(0, 1)) <= perturbation_size else bit
                                         for bit in mutated_solution]))
         return solution
+
     def ils(self, perturbation_size, convergence_criteria):
         solution = self.generate_random_solution()
         score = self.calculate_cuts(solution)
 
         ils_solution = copy.deepcopy(solution)
         ils_score = score
-
-        while self.local_search_count_calls < self.max_local_search_calls:
+        prev_solution = copy.deepcopy(solution)
+        repeat_count = 0
+        while (self.use_fm_stopping_criterion and self.local_search_count_calls < self.max_local_search_calls) or (not self.use_fm_stopping_criterion and time.time() - self.start_time < self.MLS_run_time):
             no_change_in_solution_count = 0
             run_solution = copy.deepcopy(solution)
             run_score = self.calculate_cuts(run_solution)
             while no_change_in_solution_count < convergence_criteria:
                 new_solution, new_score = self.fm_pass(solution)
-
+                if(new_solution == run_solution).all():
+                    break
                 if new_score >= run_score:
                     no_change_in_solution_count += 1
                 elif new_score < score:
                     no_change_in_solution_count = 0
                     run_solution = copy.deepcopy(new_solution)
                     run_score = new_score
-
+            if(prev_solution == run_solution).all():
+                repeat_count += 1
             if run_score < ils_score:
                 ils_solution = copy.deepcopy(run_solution)
                 ils_score = run_score
-
+            prev_solution = copy.deepcopy(run_solution)
             solution = self.mutate_solution(ils_solution, perturbation_size)
 
         # print(self.local_search_count_calls)
@@ -309,7 +317,7 @@ class Model:
         print(f"Cuts verification: {self.calculate_cuts(ils_solution)}")
         if not self.valid_solution(ils_solution):
             print("error")
-        return ils_solution, ils_score
+        return ils_solution, ils_score, repeat_count
 
     def hamming_distance(self, parent1, parent2):
         return sum(parent1 == parent2)
@@ -355,7 +363,7 @@ class Model:
         sortedIndices.sort(key=lambda x: scores[x])
 
         #Generate new child, do fm-pass until local optima and compete with worst solution.
-        while self.local_search_count_calls < self.max_local_search_calls:
+        while (self.use_fm_stopping_criterion and self.local_search_count_calls < self.max_local_search_calls) or (not self.use_fm_stopping_criterion and time.time() - self.start_time < self.MLS_run_time):
             parents = random.sample(population, 2)
             if self.hamming_distance(parents[0], parents[1]) > int(len(parents[0]) / 2):
                 offspring1 = 1 - copy.deepcopy(parents[0])
@@ -372,7 +380,10 @@ class Model:
             run_solution = copy.deepcopy(offspring1)
             run_score = self.calculate_cuts(run_solution)
             while no_change_in_solution_count < convergence_criteria:
+                
                 new_solution, new_score = self.fm_pass(copy.deepcopy(run_solution))
+                if(new_solution == run_solution).all():
+                    break
                 if self.calculate_cuts(new_solution) != new_score:
                     print("mistake")
                 if new_score >= run_score:
@@ -445,13 +456,65 @@ class Model:
                 break
         print(history)
 
-x = Model()
-timer = time.time()
-#x.hamming_distance(x.generate_random_solution(), x.generate_random_solution())
+    def gls_populationsize_test():
+        population_sizes = [10,20,40,80,160]
+        best_score = 1000
+        history = {10: [], 20: [], 40: [], 80: [], 160: []}
+        for value in population_sizes[]:
+            print(f"Test Value: {value}")
+            total_score = 0
+            for i in range(1, 26):
+                print(f"Run: {i}")
+                solution, score, = model.gls(value, 3)
+                history[value].append(score)
+            if average_score <= best_score:
+                best_score = average_score
+            else:
+                break
+        return(history)
+
+def runAll():
+    x = Model()
+    for stop_at_fm_limit in [False, False]:
+        for model in ["MLS", "ILS", "GLS"]:
+            times = []
+            scores = []
+            solutions = []
+            for i in range(5):
+                x.local_search_count_calls = 0
+                x.start_time = time.time()
+                print(f"starting {model} run", i)
+                x.use_fm_stopping_criterion = stop_at_fm_limit
+                timer = time.time()
+                if model == "MLS":
+                    solution, score = x.mls(convergence_criteria=3)
+                if model == "ILS":
+                    solution, score, repeat_count = x.ils(convergence_criteria=3, perturbation_size=0.05)
+                if model == "GLS":
+                    solution, score = x.gls(convergence_criteria=3)
+                times.append(time.time() - timer)
+                solutions.append(solution)
+                scores.append(score)
+                if not x.valid_solution(solution) or not x.calculate_cuts(solution) == score:
+                    print("error")
+                fileName = model + "-results"
+                if(stop_at_fm_limit):
+                    fileName += "-FMcriterion"
+                else:
+                    fileName += "-TIMEcriterion"
+                fileName += '.txt'
+                f = open(fileName, 'a')
+                if model == "ILS":
+                    f.write(str(round(times[-1], 2)) + '-' + str(scores[-1]) + '-' + str(repeat_count) + '\n')
+                else:
+                    f.write(str(round(times[-1], 2)) + '-' + str(scores[-1]) + '\n')
+                f.close()
+runAll()
+
 #x.mls(3)
 #for i in range(10):
     #x.local_search_count_calls = 0
-x.ils(0.05, 3)
+#x.ils(0.05, 3)
 #sol, score = x.gls(populationsize=50, convergence_criteria=5)
 #x.draw_network(sol)
-print(f"Elapsed: {time.time() - timer}")
+
